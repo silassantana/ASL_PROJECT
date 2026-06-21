@@ -1,0 +1,52 @@
+# Model checkpoints (large — store separately)
+checkpoints*/
+
+# Datasets and caches
+data/
+how2sign_cache/
+
+# H5 datasets and their stats files
+*.h5
+*.h5.train_stats.npz
+
+# YouTube-ASL scraped poses (stored in ~/youtube_asl_poses/)
+*.npz
+
+# SentencePiece artifacts (regenerated from data)
+*.spm.model
+*.spm.vocab
+
+# External libraries checked in directly
+ST-GCN/
+ST_GCN/
+I3D/
+I3D Features/
+
+# Media outputs
+*.mp4
+*.avi
+
+# PDFs dropped in project root
+*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Env / IDE
+.env
+.venv/
+venv/
+.idea/
+.vscode/
+*.swp
+
+# Extraction state
+.extraction_checkpoints/
