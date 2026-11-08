@@ -50,3 +50,18 @@ venv/
 
 # Extraction state
 .extraction_checkpoints/
+
+# Dataset metadata (large CSV exports removed from git; builder script + label map stay)
+data_csv/*.csv
+!data_csv/gloss_dict.csv
+
+# Corpus / JSONL dumps
+*.jsonl
+
+# Test and lint caches
+.pytest_cache/
+.ruff_cache/
+.pipcache/
+
+# Local run artifacts (smoke_train / inference default output)
+runs/
