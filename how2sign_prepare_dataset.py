@@ -420,7 +420,7 @@ def main():
         write_h5_from_cache(args.from_cache, args.output, vocab, max_seq_len)
         write_mapping(args.output, vocab)
         print('\nNext: train a CTC model (word-level tokens):')
-        print(f"  python train_continuous.py --data {args.output} --epochs 30 --batch-size 8")
+        print(f"  python train_seq2seq_diagnostic.py --data {args.output} --epochs 30 --batch-size 8")
         return
 
     if not args.how2sign_dir:
@@ -504,7 +504,7 @@ def main():
         write_mapping(args.output, vocab)
 
     print('\nNext: train a CTC model (word-level tokens):')
-    print(f"  python train_continuous.py --data {args.output} --epochs 30 --batch-size 8")
+    print(f"  python train_seq2seq_diagnostic.py --data {args.output} --epochs 30 --batch-size 8")
 
 
 if __name__ == '__main__':

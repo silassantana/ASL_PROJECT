@@ -360,7 +360,7 @@ def main():
     print(f"Vocabulary: {len(vocab)} words")
     print(f"Train: {len(train_samples)}, Val: {len(val_samples)}, Test: {len(test_samples)}")
     print("\\nNext step:")
-    print(f"python train_continuous.py --data {output_path} --use-transformer \\\\")
+    print(f"python train_seq2seq_diagnostic.py --data {output_path} --use-transformer \\\\")
     print(f"    --hidden-dim 512 --num-layers 8 --epochs 150")
 
 
