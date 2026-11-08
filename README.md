@@ -1,135 +1,179 @@
-# ASL → English Real-Time Translator
+# ASL → English Translation
 
-A free, open-source system for continuous American Sign Language to English translation — built for the deaf and hard-of-hearing community. A deaf person signs; a hearing person who knows no sign language reads English. No barrier.
+Continuous American Sign Language → English translation from MediaPipe
+landmark trajectories. Pre-alpha research project, revived and actively
+developed as of 2026-11.
 
-**Status:** Paused. Architecture validated; not actively maintained — contributions welcome.
+[![CI](https://img.shields.io/github/actions/workflow/status/silassantana/ASL_PROJECT/ci.yml?branch=main&label=CI)](https://github.com/silassantana/ASL_PROJECT/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
----
+The goal is a free, open-source translator for continuous signing: a deaf
+person signs, and a hearing person who knows no sign language reads English.
+Signs are motion, so the pipeline uses landmark trajectories, not image
+embeddings.
 
-## What This Is
+There is no trained landmark → text model, no reproducible benchmark, and no
+working webcam translator yet. What exists is a real data pipeline, a
+masked-pose pretraining encoder, a diagnostic seq2seq trainer, and an honest
+record of what failed. The code is still a flat collection of research scripts
+(31 root-level Python files, ~14.2k LOC) from a solo project; the revival adds
+packaging, tests, and docs around the parts that work.
 
-This project builds a real-time translation pipeline:
+## Status and what works today
 
-```
-Webcam → MediaPipe landmarks → Temporal Pose Encoder → English text
-```
+| Component | State | Notes |
+|---|---|---|
+| YouTube-ASL → pose `.npz` (`scrape_youtube_asl.py`) | Working | Downloads videos with `yt-dlp`, extracts MediaPipe trajectories + captions. Long-running, network-dependent, YouTube rate limits apply |
+| H5 dataset builders (`build_youtube_asl_h5.py`, `build_segment_h5.py`) | Working | Video-level and segment-level H5; segment splits are made at the video level to avoid signer leakage |
+| Masked-pose pretraining (`train_temporal_encoder.py`) | Working | Self-supervised masked-pose modeling; saves `best_encoder_weights.pt`, but nothing loads it yet (roadmap) |
+| Seq2seq landmark → text trainer (`train_seq2seq_diagnostic.py`) | Working (diagnostic only) | Short run whose main output is a cross-attention entropy ratio. Not a usable translator |
+| CPU smoke test (`scripts/smoke_train.py`) | Working (new) | Deterministic toy training run on synthetic poses; no data or GPU needed |
+| Landmark → text inference (`scripts/infer_landmarks.py`) | Experimental (new) | CLI exists; no real checkpoint exists yet |
+| Webcam demo (`scripts/webcam_demo.py`) | Experimental (new) | CPU webcam loop, experimental; no trained model behind it |
+| Pretrained encoder wired into fine-tuning | Roadmap | The encoder is saved but not loaded by any training script |
+| Reproducible benchmark | None yet | See [RESULTS.md](RESULTS.md) |
+| Libras support | Roadmap | See [ROADMAP.md](ROADMAP.md) |
 
-The target is **continuous, natural signing** — not isolated signs, not fingerspelling only. The model processes landmark trajectories through time rather than image features, because sign language is motion, not snapshots.
+## Data representation
 
----
+MediaPipe Holistic gives 142 landmarks: 33 pose, 21 left hand, 21 right hand,
+and 67 face points. At 3 coordinates each that is **426 real values per frame**.
+The scraper zero-pads each frame to 543 values, then stacks three streams —
+position, velocity, acceleration — into a `[T, 1629]` float32 tensor.
+
+Because the padding is 117 values per stream, **351 of the 1,629 input
+dimensions are always zero**, and more are zero when hands or face are not
+detected. Older docs called this "543 landmarks"; trimming it to the 426 real
+coordinates is [roadmap milestone 3](ROADMAP.md).
 
 ## Architecture
 
-### Input Representation
-
-Raw frames are processed by MediaPipe Holistic into body landmark trajectories:
-
-```
-[T, 1629] float32 per video clip
-  ├── 543 landmarks × 3 channels (x, y, z)
-  │     ├── 33 pose keypoints
-  │     ├── 21 left hand keypoints
-  │     ├── 21 right hand keypoints
-  │     └── 67 face keypoints
-  └── 3 temporal streams: position · velocity · acceleration
-```
-
-### Temporal Pose Encoder
-
-```
-[T, 1629] landmark trajectory
-     ↓
-1D temporal convolution   — captures hand shape and arc within a sign (~8–16 frame window)
-     ↓
-Positional encoding
-     ↓
-Transformer encoder       — captures coarticulation and long-range sign dependencies
-     ↓
-[T', hidden_dim] continuous representation
-     ↓
-Self-supervised pretraining: masked pose modeling (predict masked frames from context)
-Fine-tuning:               seq2seq decoder → English text  +  CTC auxiliary loss
+```text
+YouTube-ASL video
+  └─ MediaPipe Holistic (scrape_youtube_asl.py)
+       └─ 142 landmarks × 3 coords = 426 real values per frame
+            └─ padded to 543 values, stacked as position + velocity + acceleration
+                 └─ [T, 1629] pose trajectory
+                      │
+                      ├─ masked-pose pretraining (train_temporal_encoder.py)
+                      │    1D temporal conv → positional encoding → Transformer encoder
+                      │    → reconstruct masked frames (self-supervised)
+                      │
+                      └─ supervised seq2seq (train_seq2seq_diagnostic.py)
+                           1D temporal conv → positional encoding → Transformer encoder
+                           → Transformer decoder → English text
 ```
 
-### Why Landmark Trajectories
+The encoder in the fine-tuning path is currently trained from scratch; loading
+the pretrained weights is [roadmap milestone 1](ROADMAP.md). A CTC auxiliary
+head exists only in the legacy gloss pipeline (`sign_transformer.py`), not in
+the landmark → text path.
 
-Signs are defined by hand shape, position, motion trajectory, and facial grammar — all temporal. Frame-level image embeddings (e.g. CLIP) encode "what does this photo look like," not motion. Averaging across frames destroys all temporal information.
+## Quickstart
 
-Landmark trajectories preserve exactly what matters: how hands move through space over time.
+Runs on CPU; CI covers Python 3.10–3.12. No dataset, checkpoint, or GPU is needed for tests or the smoke run.
 
----
-
-## Dataset
-
-**YouTube-ASL** (Google Research / NeurIPS 2023, CC BY 4.0) — 11,095 videos, ~984 hours of continuous signing with English captions.
-
-Each processed clip is saved as `~/youtube_asl_poses/<video_id>.npz`:
-
-```python
-data = np.load('video_id.npz', allow_pickle=True)
-poses    = data['poses']    # [T, 1629] float32 — landmark trajectory at 15fps
-caption  = data['caption']  # str — English caption
-segments = data['segments'] # JSON — [{start, end, text}] time-aligned segments
+```bash
+git clone https://github.com/silassantana/ASL_PROJECT.git
+cd ASL_PROJECT
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+pytest -q
+make smoke
 ```
 
-Prior experiments used How2Sign (80h) and the Microsoft ASL Citizen Dataset. YouTube-ASL is ~12× larger and paired with English captions rather than gloss annotations, making it the right foundation for direct sign→text translation.
+`make smoke` is a deterministic toy training run on synthetic poses. It writes
+`runs/smoke/metrics.json` and `runs/smoke/model.pt` in under a minute and
+checks that the model path executes; its numbers are a plumbing check, not a
+translation result (see [RESULTS.md](RESULTS.md)).
 
----
+Run the experimental landmark → text CLI against the smoke checkpoint:
 
-## What We Learned (Failed Approaches)
+```bash
+python scripts/infer_landmarks.py --checkpoint runs/smoke/model.pt --npz path/to/poses.npz
+```
 
-### CLIP features → T5 decoder (BLEU-4 ≈ 0.03)
+The smoke checkpoint is trained on synthetic toy data, so its output is
+meaningless; no real checkpoint exists yet.
 
-Zero-ablation test: zeroing out visual features produced **identical** BLEU scores. Cross-attention entropy ratio = 0.984 (1.0 = perfectly uniform). The decoder learned English n-gram statistics and ignored the visual pathway entirely.
+The experimental webcam demo needs the MediaPipe extra:
 
-Root cause: CLIP is trained on static image-text pairs. A person mid-sign looks like "person on camera" in every frame. Mean-pooling 142 frames → generic embedding with no sign-discriminative signal.
+```bash
+pip install -e ".[mediapipe]"
+python scripts/webcam_demo.py --checkpoint runs/smoke/model.pt --camera 0
+```
 
-### MediaPipe + CLIP → Transformer gloss recognizer (BLEU 2.78, WER 99.91%)
+Real-data commands are in [RESULTS.md](RESULTS.md); dataset terms and
+acquisition in [THIRD_PARTY.md](THIRD_PARTY.md). No data is included.
 
-Same collapse: only 70/1000 vocab tokens ever predicted, all high-frequency function words. Adding CTC auxiliary loss (weight 0.3–0.6) improved early-epoch diversity but the decoder's language model reasserted itself by epoch 20.
+## Project structure
 
-Key insight from the CTC run: the seq2seq framework and training recipe are sound. The bottleneck was the visual representation, not the architecture.
+| Path | What it is |
+|---|---|
+| `scrape_youtube_asl.py` | YouTube-ASL video → per-video `.npz` pose trajectory + caption + segments |
+| `build_youtube_asl_h5.py` | Video-level H5 (`poses`, `captions`, `segments`, `index`) for pretraining |
+| `build_segment_h5.py` | Segment-level H5 with train/val split and normalization stats for seq2seq |
+| `train_temporal_encoder.py` | Masked-pose self-supervised pretraining (`TemporalPoseEncoder`) |
+| `train_seq2seq_diagnostic.py` | Small seq2seq landmark → text diagnostic trainer + attention-entropy metric |
+| `sign_transformer.py`, `train_transformer_encdec.py` | Legacy How2Sign/ASL Citizen gloss pipeline — failed; kept for reference |
+| `diagnose_recognizer.py`, `clip_retrieval_probe.py`, `mediapipe_collapse_probe.py` | Diagnostics used to show why the old pipelines failed |
+| `scripts/` | CPU smoke test, inference CLI, experimental webcam demo |
+| `tests/`, `.github/workflows/ci.yml` | CPU tests and CI |
+| `docs/` | Detailed docs, including [FAILED_APPROACHES.md](docs/FAILED_APPROACHES.md) |
 
----
+The other ~21 root-level scripts are abandoned How2Sign/ASL Citizen
+experiments. They are kept for provenance but are not part of the current
+pipeline.
 
-## Project Structure
+## What we learned from the failed approaches
 
-| File | Description |
-|------|-------------|
-| `sign_transformer.py` | SignLanguageTransformer with CTC head and dual-stream fusion |
-| `train_transformer_encdec.py` | Training loop with `--ctc-weight` flag |
-| `train_asl2text_t5.py` | T5 translator (prior approach, includes `--ablate-visual` diagnostic) |
-| `scrape_youtube_asl.py` | YouTube-ASL pose + caption extractor |
-| `infer_video_encdec.py` | Real-time inference from webcam or video file |
-| `diagnose_recognizer.py` | Cross-attention entropy diagnostic |
-| `modal_train.py` | Modal Labs training entrypoints |
+Two supervised approaches were tried before the revival: mean-pooled CLIP frame
+features → T5, and MediaPipe + CLIP → a gloss-recognizer Transformer. Both
+produced fluent-looking output that ignored the input. The evidence:
 
----
+- zeroing the visual features left BLEU/WER unchanged;
+- cross-attention entropy ratio was 0.984 (1.0 = uniform attention, encoder
+  ignored);
+- mean-pooled CLIP features retrieved the paired sentence at chance level.
+
+All reported numbers from those runs are **historical and not reproducible**
+from this repository: the data and checkpoints were not retained, and no
+held-out test split was ever evaluated. The detailed post-mortem and the
+diagnostics methodology are in
+[docs/FAILED_APPROACHES.md](docs/FAILED_APPROACHES.md).
+
+## Datasets and attribution
+
+The code is MIT-licensed; the datasets are not covered by that license and are
+not redistributed here.
+
+- **YouTube-ASL** — Google Research, CC BY 4.0. ~11k videos / 984 hours.
+  The repo ships the official video-ID list; videos are downloaded with
+  `yt-dlp` and stay subject to YouTube's terms.
+- **How2Sign** — CC BY-NC 4.0, research use only; used pre-revival.
+- **ASL Citizen** — community-sourced isolated-sign dataset, research terms;
+  used pre-revival.
+
+See [THIRD_PARTY.md](THIRD_PARTY.md) for attribution, dataset terms, and
+instructions for obtaining each dataset. Large third-party metadata CSVs were
+removed from git in the revival; no videos, pose files, H5 files, or
+checkpoints are included.
 
 ## Roadmap
 
-- [ ] `train_temporal_encoder.py` — masked pose modeling pretraining on YouTube-ASL
-- [ ] H5 dataset consolidation from YouTube-ASL `.npz` files
-- [ ] Supervised fine-tuning: temporal encoder → seq2seq + CTC on `(poses, captions)`
-- [ ] Real-time inference: webcam → MediaPipe → encoder → beam search → text display
-- [ ] Libras (Brazilian Sign Language) support
-
----
-
-## Philosophy
-
-This is not a research project optimizing BLEU scores. It is infrastructure for human communication across a barrier that affects millions of people.
-
-Every architectural decision is evaluated against one question: **does this get us closer to a deaf person being understood by a hearing person in real time?**
-
-The deaf community doesn't need a perfect model. They need something working in their hands today that gets better over time — built *with* them, not just *for* them.
-
----
+[ROADMAP.md](ROADMAP.md) is the source of truth for what is next. The near-term
+order is: wire the pretrained encoder into fine-tuning, produce a real
+landmark → text checkpoint, trim the 1,629-dim input to the 426 real
+coordinates, then publish a small reproducible benchmark.
 
 ## Contributing
 
-Open to contributors, especially those with lived experience in the deaf and hard-of-hearing community. Issues and pull requests welcome.
+Contributions are welcome, especially from Deaf and hard-of-hearing
+contributors and sign-language researchers. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests, and where to start.
 
 ## License
 
-Apache 2.0
+MIT, Copyright © 2026 Silas Santana. See [LICENSE](LICENSE); the license covers
+the code, not the datasets — see [THIRD_PARTY.md](THIRD_PARTY.md).
