@@ -1,0 +1,113 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "asl-project"
+version = "0.1.0"
+description = "Free, open-source real-time continuous American Sign Language to English translation from MediaPipe landmark trajectories."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Silas Santana" }]
+keywords = [
+    "asl",
+    "sign-language",
+    "translation",
+    "mediapipe",
+    "pytorch",
+    "landmark-trajectories",
+]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.2",
+    "numpy>=1.24",
+    "h5py>=3.10",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+# Landmark/video extraction pipeline (MediaPipe Holistic + OpenCV video decode).
+mediapipe = [
+    "mediapipe>=0.10",
+    "opencv-python>=4.8",
+]
+# Seq2seq / T5 training and diagnostics.
+train = [
+    "transformers>=4.41",
+    "sentencepiece>=0.2",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+]
+dev = [
+    "pytest>=7",
+    "ruff>=0.5",
+]
+
+[project.urls]
+Repository = "https://github.com/silassantana/ASL_PROJECT"
+Issues = "https://github.com/silassantana/ASL_PROJECT/issues"
+
+# Flat layout: the repo is a set of standalone research scripts. Only the
+# modules that are actually imported (by the smoke test / training code) are
+# declared; the rest remain runnable as `python <script>.py`.
+[tool.setuptools]
+py-modules = [
+    "sign_transformer",
+    "train_temporal_encoder",
+    "train_seq2seq_diagnostic",
+    "build_youtube_asl_h5",
+    "build_segment_h5",
+    "scrape_youtube_asl",
+    "diagnose_recognizer",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# Pragmatic baseline for an unformatted research codebase. These are the
+# pre-existing patterns that would otherwise bury real findings; the code is
+# not being reformatted in this pass. Rules outside this list stay enabled.
+ignore = [
+    "E401",  # multiple imports on one line
+    "E402",  # module-level import not at top of file (script pattern)
+    "E501",  # line length -- 337 pre-existing long lines
+    "E722",  # bare except
+    "E731",  # lambda assignment
+    "E741",  # ambiguous variable name
+    "F401",  # unused imports (kept for optional-dependency probing)
+    "F541",  # f-string without placeholders
+    "F811",  # redefinition of unused import/def (legacy duplicate blocks)
+    "F841",  # local variable assigned but never used
+    "B007",  # unused loop control variable
+    "B904",  # raise from inside except
+    "B905",  # zip() without explicit strict=
+    "I001",  # import sorting -- deferred, legacy scripts are not reformatted
+    "UP015",  # redundant open() mode
+    "UP028",  # yield in for loop
+    "UP032",  # f-string vs .format()
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Dataset directory is being removed from git; its remaining helper is legacy.
+"data_csv/*" = ["E", "F", "I", "UP", "B"]
